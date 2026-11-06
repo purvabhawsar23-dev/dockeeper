@@ -1,0 +1,499 @@
+/* =========================================================
+   style.css — DocKeeper UI styles
+   No external fonts or CDN links: everything is self-contained.
+   ========================================================= */
+
+/* ── Design tokens (CSS custom properties) ─────────────────
+   Defined on :root for light mode; overridden inside the
+   prefers-color-scheme: dark media query for dark mode.
+   Using variables means colours live in one place only.
+   ────────────────────────────────────────────────────────── */
+:root {
+  --bg:            #f4f6f9;
+  --surface:       #ffffff;
+  --surface-alt:   #eef1f5;
+  --border:        #d0d7e3;
+  --text:          #1a1d23;
+  --text-muted:    #5a6478;
+  --accent:        #3b6ef8;
+  --accent-hover:  #2a56d6;
+  --danger:        #d93025;
+  --success:       #1e8e3e;
+  --warning:       #f29900;
+  --radius:        10px;
+  --radius-sm:     6px;
+  --shadow:        0 2px 8px rgba(0,0,0,.08);
+  --transition:    .18s ease;
+
+  /* Status badge colours */
+  --badge-uploaded:   #e8f0fe;
+  --badge-uploaded-t: #1a56db;
+  --badge-processing: #fff8e1;
+  --badge-processing-t: #9a6400;
+  --badge-ready:      #e6f4ea;
+  --badge-ready-t:    #1e8e3e;
+  --badge-failed:     #fce8e6;
+  --badge-failed-t:   #c5221f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:            #111318;
+    --surface:       #1e2029;
+    --surface-alt:   #282c37;
+    --border:        #353a4a;
+    --text:          #e3e6ed;
+    --text-muted:    #8b93a7;
+    --accent:        #6b96ff;
+    --accent-hover:  #8aaeff;
+    --danger:        #f28b82;
+    --success:       #81c995;
+    --warning:       #fdd663;
+    --shadow:        0 2px 8px rgba(0,0,0,.35);
+
+    --badge-uploaded:   #1a2a4a;
+    --badge-uploaded-t: #8aaeff;
+    --badge-processing: #2d2500;
+    --badge-processing-t: #fdd663;
+    --badge-ready:      #0d2b18;
+    --badge-ready-t:    #81c995;
+    --badge-failed:     #2d1210;
+    --badge-failed-t:   #f28b82;
+  }
+}
+
+/* ── Reset & base ───────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 15px; }
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.app-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: .75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.logo {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.tagline {
+  font-size: .85rem;
+  color: var(--text-muted);
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+.layout {
+  display: flex;
+  flex: 1;
+  gap: 0;
+  height: calc(100vh - 49px); /* full height minus header */
+  overflow: hidden;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 1.25rem;
+  gap: .9rem;
+}
+
+.panel-left {
+  width: 340px;
+  min-width: 260px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.panel-right {
+  flex: 1;
+  background: var(--bg);
+}
+
+/* Stack panels on narrow screens */
+@media (max-width: 680px) {
+  .layout {
+    flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+  .panel-left {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+.panel-heading {
+  font-size: .8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-muted);
+}
+
+/* ── Upload box ─────────────────────────────────────────── */
+.upload-box {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  transition: border-color var(--transition), background var(--transition);
+  cursor: default;
+}
+
+.upload-box.drag-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.upload-icon { font-size: 2rem; line-height: 1; }
+
+/* Hide the native file input; we trigger it via JS */
+#fileInput { display: none; }
+
+.upload-hint       { font-size: .9rem; color: var(--text-muted); }
+.upload-hint-small { font-size: .78rem; }
+
+/* ── Upload status messages ─────────────────────────────── */
+#uploadStatus { display: flex; flex-direction: column; gap: .4rem; }
+
+.upload-msg {
+  font-size: .82rem;
+  padding: .35rem .65rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  color: var(--text-muted);
+}
+
+.upload-msg.error { background: var(--badge-failed); color: var(--badge-failed-t); }
+.upload-msg.ok    { background: var(--badge-ready);  color: var(--badge-ready-t); }
+
+/* ── Document list ──────────────────────────────────────── */
+.doc-card {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .75rem .9rem;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+.doc-name {
+  font-size: .9rem;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.doc-meta {
+  font-size: .78rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Status badge */
+.badge {
+  display: inline-block;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: .15rem .5rem;
+  border-radius: 999px;
+}
+
+.badge-uploaded   { background: var(--badge-uploaded);   color: var(--badge-uploaded-t); }
+.badge-processing { background: var(--badge-processing); color: var(--badge-processing-t); }
+.badge-ready      { background: var(--badge-ready);      color: var(--badge-ready-t); }
+.badge-failed     { background: var(--badge-failed);     color: var(--badge-failed-t); }
+
+.doc-progress {
+  font-size: .78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.doc-error {
+  font-size: .78rem;
+  color: var(--badge-failed-t);
+  word-break: break-word;
+}
+
+.doc-actions {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  margin-top: .2rem;
+}
+
+.empty-hint {
+  font-size: .85rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1rem 0;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: .4rem .9rem;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), opacity var(--transition);
+}
+
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn-primary   { background: var(--accent);  color: #fff; }
+.btn-primary:not(:disabled):hover { background: var(--accent-hover); }
+
+.btn-secondary {
+  background: var(--surface-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:not(:disabled):hover { background: var(--border); }
+
+.btn-danger {
+  background: var(--badge-failed);
+  color: var(--badge-failed-t);
+}
+.btn-danger:not(:disabled):hover { opacity: .8; }
+
+.btn-sm { padding: .25rem .6rem; font-size: .78rem; }
+
+/* Microphone button — reserved slot, visually subtle */
+.btn-icon {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: .4rem .6rem;
+  font-size: 1rem;
+}
+
+/* ── Chat ────────────────────────────────────────────────── */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: .25rem .1rem;
+  min-height: 200px;
+}
+
+/* Each turn = question bubble + answer block */
+.chat-turn { display: flex; flex-direction: column; gap: .6rem; }
+
+/* Question bubble */
+.bubble-question {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius) var(--radius-sm) var(--radius) var(--radius);
+  padding: .6rem 1rem;
+  max-width: 75%;
+  font-size: .92rem;
+  white-space: pre-wrap;       /* preserve line breaks the user typed */
+  word-break: break-word;
+}
+
+/* Answer block */
+.bubble-answer {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm) var(--radius) var(--radius) var(--radius);
+  padding: .75rem 1rem;
+  max-width: 90%;
+  font-size: .92rem;
+  line-height: 1.6;
+  /* No white-space: pre-wrap here — the JS now builds <p>, <br>,
+     <ul>, <ol> elements so the browser handles layout naturally. */
+  word-break: break-word;
+  box-shadow: var(--shadow);
+}
+
+/* Rich text formatting inside answer bubbles */
+.bubble-answer p {
+  margin-bottom: .6rem;
+}
+
+.bubble-answer p:last-child {
+  margin-bottom: 0;
+}
+
+.bubble-answer ul,
+.bubble-answer ol {
+  margin: .4rem 0 .65rem 1.4rem;
+  padding-left: .25rem;
+}
+
+.bubble-answer ul:last-child,
+.bubble-answer ol:last-child {
+  margin-bottom: 0;
+}
+
+.bubble-answer li {
+  margin-bottom: .25rem;
+  line-height: 1.55;
+}
+
+.bubble-answer li:last-child {
+  margin-bottom: 0;
+}
+
+.bubble-answer strong,
+.bubble-answer b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.bubble-answer em,
+.bubble-answer i {
+  font-style: italic;
+}
+
+.bubble-thinking {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Citation badge inside answer text — clickable */
+.cite-badge {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+  padding: .05rem .35rem;
+  border-radius: 999px;
+  cursor: pointer;
+  vertical-align: middle;
+  margin: 0 .1rem;
+  transition: opacity var(--transition);
+}
+
+.cite-badge:hover { opacity: .8; }
+
+/* ── Source cards ───────────────────────────────────────── */
+.sources-block {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  margin-top: .2rem;
+  max-width: 90%;
+}
+
+.source-card {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: .82rem;
+  overflow: hidden;
+  transition: border-color var(--transition);
+}
+
+/* Highlighted when a citation badge is clicked */
+.source-card.highlight {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.source-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .7rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.source-n {
+  background: var(--accent);
+  color: #fff;
+  font-size: .7rem;
+  font-weight: 700;
+  padding: .05rem .35rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.source-name  { font-weight: 600; flex: 1; word-break: break-all; }
+.source-page  { color: var(--text-muted); flex-shrink: 0; }
+.source-caret { color: var(--text-muted); font-size: .75rem; flex-shrink: 0; }
+
+.source-body {
+  display: none;          /* collapsed by default */
+  padding: .45rem .7rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-size: .81rem;
+}
+
+.source-body.open { display: block; }
+
+/* ── Chat input row ─────────────────────────────────────── */
+.chat-input-row {
+  display: flex;
+  gap: .5rem;
+  align-items: flex-end;
+  padding-top: .75rem;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+}
+
+.chat-textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .5rem .75rem;
+  font-size: .92rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  line-height: 1.5;
+  transition: border-color var(--transition);
+}
+
+.chat-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}

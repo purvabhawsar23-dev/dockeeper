@@ -1,0 +1,23 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16   # pgvector extends Postgres with vector similarity search
+    container_name: dockeeper_db
+    ports:
+      - "5432:5432"                 # expose Postgres on the standard local port
+    environment:
+      # Read credentials from the .env file — never hardcode secrets here
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data  # named volume keeps data across container restarts
+    healthcheck:
+      # pg_isready exits 0 only when Postgres is accepting connections
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# Declare the named volume so Docker manages its lifecycle
+volumes:
+  pgdata:

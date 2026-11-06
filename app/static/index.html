@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DocKeeper</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <span class="logo">📄 DocKeeper</span>
+    <span class="tagline">Your personal document assistant</span>
+  </header>
+
+  <!-- ── Main layout: left panel + right panel ──────────────────────── -->
+  <main class="layout">
+
+    <!-- Left panel: upload + document list -->
+    <section class="panel panel-left" aria-label="Documents">
+
+      <!-- Upload area -->
+      <div class="upload-box" id="uploadBox" role="region" aria-label="Upload area">
+        <div class="upload-icon" aria-hidden="true">⬆️</div>
+        <p class="upload-hint">Drag &amp; drop files here, or</p>
+        <!-- File picker — hidden; triggered by the button below -->
+        <input type="file" id="fileInput" multiple
+               accept=".pdf,.docx,.xlsx,.txt,.md"
+               aria-label="Choose files" />
+        <button class="btn btn-secondary" id="browseBtn">Browse files</button>
+        <p class="upload-hint upload-hint-small">PDF, DOCX, XLSX, TXT, MD · max 200 MB each</p>
+      </div>
+
+      <!-- Per-file upload progress messages -->
+      <div id="uploadStatus" aria-live="polite"></div>
+
+      <!-- Document list -->
+      <h2 class="panel-heading">Your Documents</h2>
+      <div id="docList" aria-label="Document list">
+        <p class="empty-hint">No documents yet.</p>
+      </div>
+
+    </section>
+
+    <!-- Right panel: chat -->
+    <section class="panel panel-right" aria-label="Chat">
+
+      <h2 class="panel-heading">Ask a question</h2>
+
+      <!-- Message history -->
+      <div id="chatMessages" class="chat-messages" role="log" aria-live="polite"></div>
+
+      <!-- Input row — microphone button slot is reserved but empty for now -->
+      <div class="chat-input-row">
+        <textarea id="chatInput" class="chat-textarea" rows="2"
+                  placeholder="Ask anything about your documents… (Enter to send, Shift+Enter for new line)"
+                  aria-label="Your question"></textarea>
+        <!-- Microphone button placeholder (voice not implemented yet) -->
+        <button class="btn btn-icon btn-mic" id="micBtn" disabled
+                aria-label="Voice input (coming soon)" title="Voice input coming soon">🎤</button>
+        <button class="btn btn-primary" id="sendBtn" aria-label="Send question">Send</button>
+      </div>
+
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

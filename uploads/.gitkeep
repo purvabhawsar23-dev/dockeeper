@@ -1,0 +1,4 @@
+# This file intentionally left empty.
+# Its presence tells git not to ignore the uploads/ folder even though
+# uploads/* is listed in .gitignore.  Uploaded files themselves are not
+# committed — only this placeholder is.

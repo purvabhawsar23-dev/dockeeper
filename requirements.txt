@@ -1,0 +1,39 @@
+# Core web framework — handles HTTP routing and request/response lifecycle
+fastapi
+
+# ASGI server that runs the FastAPI app; [standard] adds WebSocket support
+# and faster JSON via the uvloop and httptools extras
+uvicorn[standard]
+
+# Postgres driver for Python 3 (psycopg v3).
+# [binary] uses pre-compiled C extensions so you don't need a local
+# libpq development package installed.
+psycopg[binary]
+
+# Connection pooling for psycopg v3 — keeps connections warm between requests
+psycopg_pool
+
+# pgvector type adapter for psycopg — lets us pass Python lists as vector
+# columns directly without manual casting
+pgvector
+
+# Loads key=value pairs from a .env file into os.environ
+python-dotenv
+
+# PDF parsing — fast C-level library (MuPDF bindings), reads text and metadata
+pymupdf
+
+# Word document parsing — reads .docx paragraphs and tables
+python-docx
+
+# Excel spreadsheet parsing — reads .xlsx sheets and cells
+openpyxl
+
+# Required by FastAPI to parse multipart/form-data (file uploads)
+python-multipart
+
+# Google Generative AI SDK — used for text embeddings (gemini-embedding-001)
+google-genai
+
+# Numerical arrays — used to L2-normalise embedding vectors
+numpy

@@ -1,0 +1,16 @@
+# Real secrets — never commit this file
+.env
+
+# Virtual environment — too large and platform-specific to commit
+venv/
+
+# All uploaded files except the placeholder that keeps the folder in git
+uploads/*
+!uploads/.gitkeep
+
+# Python bytecode caches — auto-generated, not source
+__pycache__/
+*.pyc
+
+# Editor settings — personal preference, not part of the project
+.vscode/
