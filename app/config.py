@@ -88,6 +88,16 @@ MIN_SIMILARITY: float = float(os.getenv("MIN_SIMILARITY", "0.58"))
 # exceeding the model's context window for documents with many chunks.
 MAX_CONTEXT_CHARS: int = int(os.getenv("MAX_CONTEXT_CHARS", "24000"))
 
+# ---------------------------------------------------------------------------
+# OCR settings
+# ---------------------------------------------------------------------------
+
+# Which Gemini model to use for image OCR. Defaults to CHAT_MODEL.
+OCR_MODEL: str = os.getenv("OCR_MODEL", CHAT_MODEL)
+
+# Rate limit: max image OCR calls allowed per minute.
+OCR_REQUESTS_PER_MINUTE: int = int(os.getenv("OCR_REQUESTS_PER_MINUTE", "10"))
+
 
 def get_database_url() -> str:
     """
