@@ -6,12 +6,15 @@ question in plain language, get an answer grounded in your uploaded documents,
 with numbered citations linking back to the exact source chunks.
 """
 
+import logging
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.search import hybrid_search, extract_content_tokens, keyword_covers_all
 from app.llm import generate_answer
 from app.config import FINAL_K, MIN_SIMILARITY, MAX_CONTEXT_CHARS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,8 +53,86 @@ def detect_question_language(question: str) -> str:
 # Request model
 # ---------------------------------------------------------------------------
 
+class HistoryItem(BaseModel):
+    role: str
+    content: str = ""
+
+
 class ChatRequest(BaseModel):
     question: str
+    history: list[HistoryItem] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Rewrite prompt & query rewriting
+# ---------------------------------------------------------------------------
+
+# WHY REWRITE QUESTIONS:
+# Follow-up questions (such as "what about the second point?" or "how much did it cost?")
+# lack standalone context and fail in hybrid search. Rewriting resolves references
+# and pronouns against recent conversation history into an effective search query.
+#
+# WHY CAP HISTORY:
+# Conversation history is capped to at most 6 items (3 user/assistant turns) and
+# 1500 chars per message to control Gemini token usage and avoid exhausting API quota.
+
+REWRITE_SYSTEM_PROMPT = """You are a search query rewriter.
+Your task is to rewrite the user's latest question into a single standalone question that can be understood without the conversation history.
+
+Rules you must follow strictly:
+1. Use the conversation history ONLY to resolve pronouns (it, they, this, that, he, she, etc.) and references to previous topics.
+2. Keep the user's language (English, Hindi, or Hinglish — match the latest question).
+3. Do NOT answer the question. Only rewrite it.
+4. If the question is already standalone, return it unchanged.
+5. Return ONLY the question text — no explanations, no quotes, no markdown, no conversational filler.
+"""
+
+
+def rewrite_question(question: str, history: list[dict]) -> str:
+    """
+    Rewrite a follow-up question into a standalone query using conversation history.
+
+    Returns the rewritten question capped at 300 characters, or falls back to
+    the original question if history is empty, the rewrite is empty, or the LLM call fails.
+    """
+    if not history:
+        return question
+
+    history_lines = []
+    for item in history:
+        role = "User" if item["role"] == "user" else "Assistant"
+        content = item["content"][:1500].strip()
+        history_lines.append(f"{role}: {content}")
+
+    formatted_history = "\n".join(history_lines)
+    user_prompt = (
+        f"Conversation history:\n{formatted_history}\n\n"
+        f"Latest question: {question}\n\n"
+        f"Standalone question:"
+    )
+
+    try:
+        rewritten = generate_answer(REWRITE_SYSTEM_PROMPT, user_prompt)
+        rewritten = rewritten.strip()
+
+        # Remove surrounding quotes if the model wrapped the question in them
+        if (rewritten.startswith('"') and rewritten.endswith('"')) or (
+            rewritten.startswith("'") and rewritten.endswith("'")
+        ):
+            rewritten = rewritten[1:-1].strip()
+
+        # Limit to 300 characters
+        rewritten = rewritten[:300].strip()
+
+        # Fall back to original question if empty
+        if not rewritten:
+            return question
+
+        return rewritten
+
+    except Exception as exc:
+        logger.warning("Query rewrite failed: %s; falling back to original question.", exc)
+        return question
 
 
 # ---------------------------------------------------------------------------
@@ -90,47 +171,57 @@ Rules you must always follow:
 @router.post("/chat")
 def chat(request: ChatRequest):
     """
-    Answer a question using the user's uploaded documents.
+    Answer a question using the user's uploaded documents and conversation memory.
 
     Pipeline:
-      1. Hybrid search (vector + keyword via RRF) → FINAL_K candidates.
-      2. Relevance gate: skip LLM if no result is relevant enough.
-      3. Build numbered source context, capped at MAX_CONTEXT_CHARS.
-      4. Call the LLM with the system prompt + sources + question.
-      5. Return the answer and the source list used.
+      1. Validate question and history (reject unknown roles with 400).
+      2. Rewrite follow-up question into standalone query if history present.
+      3. Hybrid search (vector + keyword via RRF) using rewritten search query.
+      4. Relevance gate: skip LLM if no result is relevant enough.
+      5. Build numbered source context, capped at MAX_CONTEXT_CHARS.
+      6. Call the LLM with system prompt + sources + original question (and search query if differing).
+      7. Return answer, cited sources, and search_query.
     """
     question = request.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question must not be empty.")
 
-    # --- 1. Hybrid search ---
+    raw_history = request.history or []
+
+    # Reject any history item with an unknown role with HTTP 400
+    for item in raw_history:
+        if item.role not in ("user", "assistant"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown role '{item.role}'. Allowed roles are 'user' or 'assistant'.",
+            )
+
+    # Truncate each content to 1500 characters and cap history to at most 6 items
+    history = [
+        {"role": item.role, "content": item.content[:1500]}
+        for item in raw_history[-6:]
+    ]
+
+    # --- 1. Rewrite question if history is present ---
+    search_query = rewrite_question(question, history) if history else question
+
+    # --- 2. Hybrid search (using search_query) ---
     try:
-        results = hybrid_search(question, k=FINAL_K)
+        results = hybrid_search(search_query, k=FINAL_K)
     except Exception as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Search failed (embedding or database error): {exc}",
         )
 
-    # --- 2. Relevance gate ---
-    # Why two separate conditions instead of "any keyword_rank"?
-    #   keyword_search uses OR matching, so a chunk needs only ONE content
-    #   word to get a keyword_rank.  A common word like "policy" appearing in
-    #   an unrelated chunk would pass the old gate even though the question is
-    #   completely off-topic.  We tighten it:
-    #     - Vector arm: best similarity must meet MIN_SIMILARITY.
-    #     - Keyword arm: at least one retrieved chunk must contain ALL content
-    #       tokens (AND), not just any one of them.
-    #   Either condition alone is enough to call the LLM.
-
+    # --- 3. Relevance gate (using search_query) ---
     best_similarity = max(
         (r["vector_similarity"] for r in results if r["vector_similarity"] is not None),
         default=0.0,
     )
     vector_passes = best_similarity >= MIN_SIMILARITY
 
-    # keyword_covers_all uses AND so a chunk must contain every content token.
-    tokens = extract_content_tokens(question)
+    tokens = extract_content_tokens(search_query)
     retrieved_ids = [r["chunk_id"] for r in results]
     keyword_passes = bool(tokens) and bool(keyword_covers_all(retrieved_ids, tokens))
 
@@ -138,13 +229,10 @@ def chat(request: ChatRequest):
         return {
             "answer":  "I couldn't find this in your documents.",
             "sources": [],
+            "search_query": search_query,
         }
 
-    # --- 3. Build numbered source context ---
-    # Format each result as "[n] filename, page p:\n<content>" so the model
-    # has clear attribution for every passage it reads.
-    # We accumulate characters and stop when we'd exceed MAX_CONTEXT_CHARS so
-    # the total prompt stays within the model's context window.
+    # --- 4. Build numbered source context ---
     source_lines: list[str] = []
     sources_meta: list[dict] = []
     total_chars = 0
@@ -164,67 +252,51 @@ def chat(request: ChatRequest):
             "filename":    result["filename"],
             "page_number": result["page_number"],
             "chunk_id":    result["chunk_id"],
-            # preview: short snippet for list views that don't need full text
             "preview":     result["content"][:300],
-            # content: full chunk text — the interface needs it to highlight
-            # the exact passage the model cited
             "content":     result["content"],
         })
         total_chars += len(line)
 
     if not source_lines:
-        # Every source was too long and was skipped — this shouldn't happen
-        # in practice given MAX_CONTEXT_CHARS=24000, but guard anyway.
         return {
             "answer":  "I couldn't find this in your documents.",
             "sources": [],
+            "search_query": search_query,
         }
 
     context_block = "\n\n---\n\n".join(source_lines)
 
-    # Why does the language instruction go last?
-    #   LLMs pay most attention to tokens near the end of the prompt (recency
-    #   bias).  Placing the language directive as the very last lines — after
-    #   the source text — makes it the freshest instruction in context and
-    #   overrides any language signal the model picked up from English sources.
     answer_language = detect_question_language(question)
+
+    query_line = (
+        f"Question: {question}\nSearch query: {search_query}"
+        if search_query != question
+        else f"Question: {question}"
+    )
+
     user_prompt = (
         f"Sources:\n\n{context_block}\n\n"
-        f"Question: {question}\n"
+        f"{query_line}\n"
         f"Answer language: {answer_language}. "
         f"The sources are in English, but that does not matter: "
         f"write the answer in the answer language, not the language of the sources."
     )
 
-    # --- 4. Call the LLM ---
+    # --- 5. Call the LLM ---
     try:
         answer = generate_answer(SYSTEM_PROMPT, user_prompt)
     except Exception as exc:
-        # Return a clean JSON error rather than a 500 stack trace so the
-        # client can display a friendly message to the user.
         raise HTTPException(
             status_code=502,
             detail=f"LLM call failed: {exc}",
         )
 
-    # --- 5. Return only the cited sources ---
-    # Why filter to cited sources only?
-    #   Returning every retrieved chunk forces the client to show references
-    #   the model never mentioned, which is misleading — the user would see
-    #   "source: invoice.pdf page 3" for an answer that never referenced it.
-    #   Filtering to cited chunks keeps the sources list honest: every entry
-    #   shown to the user was actually used in the answer.
-
+    # --- 6. Return only the cited sources ---
     REFUSAL = "I couldn't find this in your documents."
 
     if answer.strip() == REFUSAL:
-        # Model explicitly said nothing was found — no sources to show.
         cited_sources = []
     else:
-        # Parse every [n] citation from the answer text.
-        # Handles: [2]  [3, 7]  [3][7]  [3,7]  [1, 2, 3]
-        # The pattern finds all bracket groups, then splits on commas inside
-        # each group so multi-citation brackets are handled in one pass.
         import re
         cited_ns: set[int] = set()
         for bracket in re.findall(r'\[(\d[\d,\s]*)\]', answer):
@@ -234,17 +306,14 @@ def chat(request: ChatRequest):
                     cited_ns.add(int(num))
 
         if cited_ns:
-            # Keep only sources whose n the model actually cited.
-            # Preserve original n so "[2]" in the answer still matches source 2.
             cited_sources = [s for s in sources_meta if s["n"] in cited_ns]
         else:
-            # Answer is not a refusal but cites nothing (e.g. a summary with
-            # no inline [n] markers) — return all sources so nothing is hidden.
             cited_sources = sources_meta
 
     return {
         "answer":  answer,
         "sources": cited_sources,
+        "search_query": search_query,
     }
 
 

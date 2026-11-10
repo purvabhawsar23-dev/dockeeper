@@ -360,6 +360,13 @@ async function reprocessDocument(id) {
    CHAT
    ========================================================== */
 
+// Conversation history for multi-turn chat memory:
+// Array of { role: "user" | "assistant", content: string }
+// WHY CAP HISTORY:
+// Follow-ups cannot be searched without context, and history is capped to
+// at most 6 items (3 turns) to control LLM quota.
+const conversationHistory = [];
+
 // Enter sends; Shift+Enter inserts a new line (standard chat UX)
 chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -396,11 +403,17 @@ async function sendQuestion() {
   chatMessages.appendChild(turn);
   scrollToBottom();
 
+  // Snapshot up to 6 most recent history items
+  const historyToSend = conversationHistory.slice(-6);
+
   try {
     const res  = await fetch("/chat", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ question }),
+      body:    JSON.stringify({
+        question,
+        history: historyToSend,
+      }),
     });
     const data = await res.json();
 
@@ -409,6 +422,10 @@ async function sendQuestion() {
       aBubble.textContent = `Error: ${data.detail ?? res.statusText}`;
       return;
     }
+
+    // Save successful exchange to conversation history
+    conversationHistory.push({ role: "user", content: question });
+    conversationHistory.push({ role: "assistant", content: data.answer });
 
     // Replace "Thinking…" with the real answer
     aBubble.className   = "bubble-answer";
