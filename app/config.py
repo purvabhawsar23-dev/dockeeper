@@ -87,7 +87,7 @@ RRF_K: int = int(os.getenv("RRF_K", "60"))
 # Relevance gate: if no result meets this cosine similarity threshold AND
 # no result appeared in the keyword search, we skip the LLM entirely and
 # return a "not found" message.
-MIN_SIMILARITY: float = float(os.getenv("MIN_SIMILARITY", "0.58"))
+MIN_SIMILARITY: float = float(os.getenv("MIN_SIMILARITY", "0.55"))
 
 # Hard cap on total characters sent to the LLM as context. Prevents
 # exceeding the model's context window for documents with many chunks.
