@@ -497,3 +497,182 @@ body {
   outline: none;
   border-color: var(--accent);
 }
+
+/* ── Voice & Audio controls ─────────────────────────────── */
+
+/* Chat header bar: title + auto-speak toggle */
+.chat-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.auto-speak-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auto-speak-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.auto-speak-toggle:hover {
+  color: var(--text);
+}
+
+/* Voice status / alert message banner */
+.voice-status {
+  display: none;
+  font-size: .82rem;
+  padding: .45rem .75rem;
+  border-radius: var(--radius-sm);
+  margin-top: .4rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  transition: opacity var(--transition);
+}
+
+.voice-status.visible {
+  display: flex;
+}
+
+.voice-status.error {
+  background: var(--badge-failed);
+  color: var(--badge-failed-t);
+  border: 1px solid var(--danger);
+}
+
+.voice-status.warning {
+  background: var(--badge-processing);
+  color: var(--badge-processing-t);
+  border: 1px solid var(--warning);
+}
+
+.voice-status.info {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.voice-status-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 .2rem;
+  border-radius: var(--radius-sm);
+}
+
+.voice-status-close:hover {
+  opacity: .75;
+}
+
+/* Answer header with speaker button */
+.answer-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: .3rem;
+}
+
+.btn-speak {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .2rem .45rem;
+  font-size: .85rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .25rem;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.btn-speak:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.btn-speak.speaking {
+  background: var(--badge-processing);
+  color: var(--badge-processing-t);
+  border-color: var(--warning);
+}
+
+/* Voice language select */
+.voice-lang-select {
+  background: var(--surface-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .4rem .45rem;
+  font-size: .8rem;
+  font-family: inherit;
+  cursor: pointer;
+  height: 38px;
+  max-width: 130px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.voice-lang-select:focus {
+  border-color: var(--accent);
+}
+
+/* Mic button */
+.btn-mic {
+  height: 38px;
+  min-width: 38px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+
+.btn-mic:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text);
+}
+
+.btn-mic.listening {
+  background: var(--badge-failed);
+  color: var(--badge-failed-t);
+  border-color: var(--danger);
+  animation: pulse-mic 1.4s infinite ease-in-out;
+}
+
+@keyframes pulse-mic {
+  0% {
+    box-shadow: 0 0 0 0 rgba(217, 48, 37, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(217, 48, 37, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 48, 37, 0);
+  }
+}
+
+/* Mobile responsiveness adjustments */
+@media (max-width: 480px) {
+  .voice-lang-select {
+    max-width: 95px;
+    padding: .35rem .25rem;
+    font-size: .74rem;
+  }
+  .btn-mic, .btn-primary {
+    padding: .4rem .55rem;
+  }
+}

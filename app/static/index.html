@@ -46,19 +46,34 @@
     <!-- Right panel: chat -->
     <section class="panel panel-right" aria-label="Chat">
 
-      <h2 class="panel-heading">Ask a question</h2>
+      <div class="chat-header-bar">
+        <h2 class="panel-heading">Ask a question</h2>
+        <!-- Checkbox to read incoming answers aloud automatically -->
+        <label class="auto-speak-toggle" for="autoSpeakCheckbox">
+          <input type="checkbox" id="autoSpeakCheckbox" />
+          <span>Read answers aloud automatically</span>
+        </label>
+      </div>
 
       <!-- Message history -->
       <div id="chatMessages" class="chat-messages" role="log" aria-live="polite"></div>
 
-      <!-- Input row — microphone button slot is reserved but empty for now -->
+      <!-- Voice notification/status message banner (for errors, permissions, voice alerts) -->
+      <div id="voiceStatus" class="voice-status" aria-live="polite"></div>
+
+      <!-- Input row with textarea, language selector, mic button, and send button -->
       <div class="chat-input-row">
         <textarea id="chatInput" class="chat-textarea" rows="2"
                   placeholder="Ask anything about your documents… (Enter to send, Shift+Enter for new line)"
                   aria-label="Your question"></textarea>
-        <!-- Microphone button placeholder (voice not implemented yet) -->
-        <button class="btn btn-icon btn-mic" id="micBtn" disabled
-                aria-label="Voice input (coming soon)" title="Voice input coming soon">🎤</button>
+        <!-- Language selector for speech recognition: en-IN and hi-IN -->
+        <select id="voiceLangSelect" class="voice-lang-select" aria-label="Speech recognition language" title="Speech recognition language">
+          <option value="en-IN">English (India)</option>
+          <option value="hi-IN">Hindi</option>
+        </select>
+        <!-- Microphone button for voice input -->
+        <button class="btn btn-icon btn-mic" id="micBtn" type="button"
+                aria-label="Voice input" title="Voice input">🎤</button>
         <button class="btn btn-primary" id="sendBtn" aria-label="Send question">Send</button>
       </div>
 

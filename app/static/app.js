@@ -21,14 +21,18 @@ const ALLOWED_EXTS    = new Set([
 ]);
 
 /* ── DOM references ─────────────────────────────────────── */
-const uploadBox    = document.getElementById("uploadBox");
-const fileInput    = document.getElementById("fileInput");
-const browseBtn    = document.getElementById("browseBtn");
-const uploadStatus = document.getElementById("uploadStatus");
-const docList      = document.getElementById("docList");
-const chatMessages = document.getElementById("chatMessages");
-const chatInput    = document.getElementById("chatInput");
-const sendBtn      = document.getElementById("sendBtn");
+const uploadBox         = document.getElementById("uploadBox");
+const fileInput         = document.getElementById("fileInput");
+const browseBtn         = document.getElementById("browseBtn");
+const uploadStatus      = document.getElementById("uploadStatus");
+const docList           = document.getElementById("docList");
+const chatMessages      = document.getElementById("chatMessages");
+const chatInput         = document.getElementById("chatInput");
+const sendBtn           = document.getElementById("sendBtn");
+const micBtn            = document.getElementById("micBtn");
+const voiceLangSelect   = document.getElementById("voiceLangSelect");
+const autoSpeakCheckbox = document.getElementById("autoSpeakCheckbox");
+const voiceStatus       = document.getElementById("voiceStatus");
 
 /* ── Polling state ──────────────────────────────────────── */
 // Map of doc_id -> intervalId for active polls.
@@ -591,10 +595,43 @@ function renderRichText(container, text) {
 function renderAnswer(container, answerText, sources, turn) {
   renderRichText(container, answerText);
 
+  // Check if the answer is a refusal ("I couldn't find this in your documents.")
+  const isRefusal = answerText
+    .trim()
+    .toLowerCase()
+    .startsWith("i couldn't find this in your documents");
+
+  let speakBtn = null;
+
+  // Do not show the speaker button on refusal answers or error messages
+  if (!isRefusal && "speechSynthesis" in window) {
+    const header = document.createElement("div");
+    header.className = "answer-header";
+
+    speakBtn = document.createElement("button");
+    speakBtn.type = "button";
+    speakBtn.className = "btn-speak";
+    speakBtn.setAttribute("aria-label", "Read answer aloud");
+    speakBtn.title = "Read answer aloud";
+    speakBtn.textContent = "🔊";
+
+    speakBtn.addEventListener("click", () => {
+      speakAnswer(answerText, speakBtn);
+    });
+
+    header.appendChild(speakBtn);
+    container.insertBefore(header, container.firstChild);
+  }
+
   // Append source cards if any were returned
   if (sources.length > 0) {
     const block = buildSourcesBlock(sources);
     turn.appendChild(block);
+  }
+
+  // If "Read answers aloud automatically" is checked, start speaking
+  if (autoSpeakEnabled && speakBtn && !isRefusal) {
+    speakAnswer(answerText, speakBtn);
   }
 }
 
@@ -665,6 +702,437 @@ function buildSourcesBlock(sources) {
   }
 
   return block;
+}
+
+
+/* ==========================================================
+   VOICE STATUS & ALERTS
+   ========================================================== */
+
+let voiceStatusTimer = null;
+
+/**
+ * Display a friendly status or error message in the voice status banner.
+ * Uses ONLY textContent and DOM element creation — NEVER innerHTML.
+ */
+function showVoiceStatus(message, kind = "info") {
+  if (!voiceStatus) return;
+
+  if (voiceStatusTimer) {
+    clearTimeout(voiceStatusTimer);
+    voiceStatusTimer = null;
+  }
+
+  // Clear existing content safely
+  voiceStatus.textContent = "";
+  voiceStatus.className = `voice-status visible ${kind}`;
+
+  const textSpan = document.createElement("span");
+  textSpan.textContent = message; // safe from XSS
+  voiceStatus.appendChild(textSpan);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "voice-status-close";
+  closeBtn.setAttribute("aria-label", "Dismiss message");
+  closeBtn.textContent = "✕";
+  closeBtn.addEventListener("click", () => {
+    voiceStatus.className = "voice-status";
+    voiceStatus.textContent = "";
+  });
+  voiceStatus.appendChild(closeBtn);
+
+  // Automatically dismiss after 7 seconds
+  voiceStatusTimer = setTimeout(() => {
+    voiceStatus.className = "voice-status";
+    voiceStatus.textContent = "";
+  }, 7000);
+}
+
+
+/* ==========================================================
+   VOICE INPUT (SpeechRecognition)
+   ========================================================== */
+
+// PRIVACY NOTE (SpeechRecognition):
+// In Chromium-based browsers (Google Chrome, Microsoft Edge), audio recorded
+// by the SpeechRecognition API is sent to Google's cloud speech recognition
+// services for transcription over the network.
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+let recognition = null;
+let isListening = false;
+let baseInputText = "";
+
+if (SpeechRecognition && micBtn) {
+  micBtn.disabled = false;
+  micBtn.removeAttribute("disabled");
+  micBtn.setAttribute("aria-label", "Voice input");
+  micBtn.title = "Voice input";
+
+  // Remember language selection in localStorage (try/catch)
+  let savedLang = "en-IN";
+  try {
+    const val = localStorage.getItem("dockeeper_voice_lang");
+    if (val === "en-IN" || val === "hi-IN") {
+      savedLang = val;
+    }
+  } catch (e) {
+    // localStorage restricted or disabled
+  }
+
+  if (voiceLangSelect) {
+    voiceLangSelect.value = savedLang;
+    voiceLangSelect.addEventListener("change", () => {
+      try {
+        localStorage.setItem("dockeeper_voice_lang", voiceLangSelect.value);
+      } catch (e) {}
+
+      // If user changes language mid-recognition, stop current session
+      if (isListening && recognition) {
+        recognition.stop();
+      }
+    });
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    isListening = true;
+    micBtn.classList.add("listening");
+    micBtn.setAttribute("aria-label", "Listening… Click to stop");
+    micBtn.title = "Listening… Click to stop";
+    micBtn.textContent = "⏹";
+
+    // Capture existing text so new speech appends with proper spacing
+    const cur = chatInput.value;
+    baseInputText = cur.length > 0 && !cur.endsWith(" ") && !cur.endsWith("\n")
+      ? cur + " "
+      : cur;
+  };
+
+  recognition.onresult = (event) => {
+    let sessionFinal = "";
+    let sessionInterim = "";
+
+    for (let i = 0; i < event.results.length; ++i) {
+      const res = event.results[i];
+      if (res.isFinal) {
+        sessionFinal += res[0].transcript;
+      } else {
+        sessionInterim += res[0].transcript;
+      }
+    }
+
+    // Show interim results live in the text box
+    const fullText = baseInputText + sessionFinal + (sessionInterim ? (sessionFinal ? " " : "") + sessionInterim : "");
+    chatInput.value = fullText;
+    chatInput.scrollTop = chatInput.scrollHeight;
+  };
+
+  recognition.onerror = (event) => {
+    // Friendly, descriptive error messages in the interface
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      showVoiceStatus("Microphone permission was denied. Please allow microphone access in your browser settings.", "error");
+    } else if (event.error === "no-speech") {
+      showVoiceStatus("No speech was heard. Please try speaking again.", "info");
+    } else if (event.error === "network") {
+      showVoiceStatus("Network error occurred during speech recognition. Please check your connection.", "error");
+    } else if (event.error === "audio-capture") {
+      showVoiceStatus("No microphone detected or audio capture failed.", "error");
+    } else if (event.error !== "aborted") {
+      showVoiceStatus(`Voice input error: ${event.error}`, "error");
+    }
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    micBtn.classList.remove("listening");
+    micBtn.setAttribute("aria-label", "Voice input");
+    micBtn.title = "Voice input";
+    micBtn.textContent = "🎤";
+
+    // WHY NO AUTO-SEND:
+    // Speech recognition can mishear words or transcribe punctuation unexpectedly.
+    // Leaving the final text in the input box allows the user to review, edit,
+    // and confirm their prompt before sending.
+  };
+
+  micBtn.addEventListener("click", () => {
+    if (isListening) {
+      recognition.stop();
+    } else {
+      if (voiceLangSelect) {
+        recognition.lang = voiceLangSelect.value;
+      }
+      try {
+        recognition.start();
+      } catch (err) {
+        console.warn("Could not start speech recognition:", err);
+      }
+    }
+  });
+
+} else {
+  // Browser does not support speech recognition: hide mic button and language selector completely
+  if (micBtn) micBtn.style.display = "none";
+  if (voiceLangSelect) voiceLangSelect.style.display = "none";
+}
+
+
+/* ==========================================================
+   AUTO-SPEAK SETTING
+   ========================================================== */
+
+let autoSpeakEnabled = false;
+try {
+  autoSpeakEnabled = localStorage.getItem("dockeeper_auto_speak") === "true";
+} catch (e) {}
+
+if (autoSpeakCheckbox) {
+  autoSpeakCheckbox.checked = autoSpeakEnabled;
+  autoSpeakCheckbox.addEventListener("change", () => {
+    autoSpeakEnabled = autoSpeakCheckbox.checked;
+    try {
+      localStorage.setItem("dockeeper_auto_speak", String(autoSpeakEnabled));
+    } catch (e) {}
+  });
+}
+
+
+/* ==========================================================
+   SPOKEN ANSWERS (SpeechSynthesis)
+   ========================================================== */
+
+let availableVoices = [];
+
+// WHY VOICES LOAD ASYNCHRONOUSLY:
+// In most modern browsers (Chrome, Edge, Safari), the speech synthesis engine
+// queries voices from the operating system or network asynchronously after page load.
+// speechSynthesis.getVoices() is initially empty, so we must register an 'onvoiceschanged'
+// listener to capture voices once the browser finishes populating them.
+function loadVoices() {
+  if (!("speechSynthesis" in window)) return;
+  availableVoices = window.speechSynthesis.getVoices();
+}
+
+if ("speechSynthesis" in window) {
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+/**
+ * Remove citation markers like [3] or [3, 7] and markdown symbols (*, **, #, bullet dashes, etc.)
+ * so the text reads naturally without pronunciation awkwardness.
+ */
+function cleanTextForSpeech(text) {
+  if (!text) return "";
+  let clean = text;
+
+  // Remove citation markers like [1], [2, 3], [3][7]
+  clean = clean.replace(/\[\d+[\d,\s]*\]/g, "");
+
+  // Remove markdown headers (# Title)
+  clean = clean.replace(/^#+\s+/gm, "");
+
+  // Remove bullet points (* item or - item)
+  clean = clean.replace(/^[\*\-]\s+/gm, "");
+
+  // Remove bold / italic markers (* or **)
+  clean = clean.replace(/\*\*/g, "");
+  clean = clean.replace(/\*/g, "");
+  clean = clean.replace(/_{1,2}(.*?)_{1,2}/g, "$1");
+
+  // Remove code blocks and inline backticks
+  clean = clean.replace(/`+/g, "");
+
+  // Remove table separator pipes
+  clean = clean.replace(/\|/g, " ");
+
+  // Normalize whitespace: collapse consecutive spaces and excessive line breaks
+  clean = clean.replace(/[ \t]+/g, " ");
+  clean = clean.replace(/\n\s*\n/g, "\n");
+
+  return clean.trim();
+}
+
+/**
+ * WHY SPLIT LONG TEXT INTO SENTENCES:
+ * Chromium and Safari suffer from a well-documented bug where SpeechSynthesisUtterance
+ * instances that take longer than ~15 seconds to speak silently cut off mid-speech.
+ * Splitting text into individual sentences and queueing them sequentially guarantees
+ * reliable playback of arbitrarily long answers.
+ */
+function splitIntoSentences(text) {
+  if (!text) return [];
+
+  // Split on sentence-ending punctuation: . ! ? as well as Hindi danda (।) and double danda (॥),
+  // followed by whitespace, newline, or end of string.
+  const rawParts = text
+    .split(/([.!?।॥]+(?:\s+|\n+|$)|[\n\r]+)/)
+    .filter(Boolean);
+
+  const sentences = [];
+  let buffer = "";
+
+  for (const part of rawParts) {
+    buffer += part;
+    if (/[.!?।॥][\s\n]*$/.test(buffer) || /[\n\r]+$/.test(buffer)) {
+      const trimmed = buffer.trim();
+      if (trimmed) sentences.push(trimmed);
+      buffer = "";
+    }
+  }
+
+  const remaining = buffer.trim();
+  if (remaining) sentences.push(remaining);
+
+  // Fallback: if any segment is unusually long (> 200 chars), break along clauses
+  const result = [];
+  for (const s of sentences) {
+    if (s.length > 200) {
+      const clauses = s.match(/[^,;]+[,;]?/g) || [s];
+      for (const c of clauses) {
+        const ct = c.trim();
+        if (ct) result.push(ct);
+      }
+    } else {
+      result.push(s);
+    }
+  }
+
+  return result.length > 0 ? result : [text.trim()];
+}
+
+/**
+ * Pick an installed voice whose lang starts with that language.
+ * Returns null if no appropriate voice is found.
+ */
+function findVoiceForLanguage(targetLang) {
+  if (!availableVoices.length) {
+    loadVoices();
+  }
+  const normTarget = targetLang.toLowerCase().replace("_", "-");
+
+  // 1. Try exact prefix match (e.g. "hi-in" or "en-in")
+  let voice = availableVoices.find((v) =>
+    v.lang.toLowerCase().replace("_", "-").startsWith(normTarget)
+  );
+
+  // 2. Fall back to base language prefix (e.g. "hi" or "en")
+  if (!voice) {
+    const baseLang = normTarget.split("-")[0];
+    voice = availableVoices.find((v) =>
+      v.lang.toLowerCase().replace("_", "-").startsWith(baseLang)
+    );
+  }
+
+  return voice || null;
+}
+
+// Global speaking state: only one answer speaks at a time
+let currentSpeakingBtn = null;
+let isSpeakingActive = false;
+
+function stopSpeaking() {
+  isSpeakingActive = false;
+  if ("speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch (e) {}
+  }
+  if (currentSpeakingBtn) {
+    currentSpeakingBtn.classList.remove("speaking");
+    currentSpeakingBtn.setAttribute("aria-label", "Read answer aloud");
+    currentSpeakingBtn.title = "Read answer aloud";
+    currentSpeakingBtn.textContent = "🔊";
+    currentSpeakingBtn = null;
+  }
+  window.__activeUtterance = null;
+}
+
+// Stop speech when the page unloads
+window.addEventListener("beforeunload", stopSpeaking);
+window.addEventListener("pagehide", stopSpeaking);
+
+function speakAnswer(text, btn) {
+  if (!("speechSynthesis" in window)) {
+    showVoiceStatus("Speech synthesis is not supported in this browser.", "warning");
+    return;
+  }
+
+  // Toggle off if currently reading this same answer
+  if (currentSpeakingBtn === btn) {
+    stopSpeaking();
+    return;
+  }
+
+  // Stop any other answer that may already be speaking
+  stopSpeaking();
+
+  const cleanText = cleanTextForSpeech(text);
+  if (!cleanText) return;
+
+  // Choose language: Devanagari characters (U+0900–U+097F) -> hi-IN, else en-IN
+  const isHindi = /[\u0900-\u097F]/.test(cleanText);
+  const targetLang = isHindi ? "hi-IN" : "en-IN";
+
+  const voice = findVoiceForLanguage(targetLang);
+  if (!voice) {
+    const langLabel = isHindi ? "Hindi" : "English";
+    showVoiceStatus(`No ${langLabel} voice is installed on this device.`, "warning");
+    return;
+  }
+
+  const sentences = splitIntoSentences(cleanText);
+  if (sentences.length === 0) return;
+
+  currentSpeakingBtn = btn;
+  isSpeakingActive = true;
+  btn.classList.add("speaking");
+  btn.setAttribute("aria-label", "Stop reading aloud");
+  btn.title = "Stop reading aloud";
+  btn.textContent = "⏹";
+
+  let sentenceIdx = 0;
+
+  function speakNextSentence() {
+    if (!isSpeakingActive || currentSpeakingBtn !== btn) return;
+
+    if (sentenceIdx >= sentences.length) {
+      stopSpeaking();
+      return;
+    }
+
+    const sentenceText = sentences[sentenceIdx++];
+    const utterance = new SpeechSynthesisUtterance(sentenceText);
+    utterance.voice = voice;
+    utterance.lang = voice.lang || targetLang;
+
+    utterance.onend = () => {
+      if (isSpeakingActive && currentSpeakingBtn === btn) {
+        speakNextSentence();
+      }
+    };
+
+    utterance.onerror = (e) => {
+      if (e.error !== "canceled" && e.error !== "interrupted") {
+        console.warn("Speech synthesis utterance error:", e.error);
+      }
+      stopSpeaking();
+    };
+
+    // Keep global reference to utterance to prevent garbage collection in Chrome
+    window.__activeUtterance = utterance;
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  speakNextSentence();
 }
 
 
