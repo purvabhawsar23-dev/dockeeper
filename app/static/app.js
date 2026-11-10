@@ -11,8 +11,14 @@
 
 /* ── Constants ───────────────────────────────────────────── */
 const MAX_FILE_MB     = 200;
+const MAX_IMAGE_MB    = 10;
 const POLL_INTERVAL   = 2000; // ms between status polls
 const ACTIVE_STATUSES = new Set(["uploaded", "processing"]);
+const IMAGE_EXTS      = new Set(["png", "jpg", "jpeg", "webp"]);
+const ALLOWED_EXTS    = new Set([
+  "pdf", "docx", "xlsx", "txt", "md",
+  "png", "jpg", "jpeg", "webp"
+]);
 
 /* ── DOM references ─────────────────────────────────────── */
 const uploadBox    = document.getElementById("uploadBox");
@@ -66,10 +72,24 @@ async function handleFiles(files) {
 
 /** Upload a single file; show inline status; refresh document list. */
 async function uploadFile(file) {
-  // Browser-side size check — avoids sending a huge file only to get a 413.
-  if (file.size > MAX_FILE_MB * 1024 * 1024) {
+  // Browser-side file type check
+  const ext = file.name.split(".").pop().toLowerCase();
+  if (!ALLOWED_EXTS.has(ext)) {
     showUploadMsg(
-      `"${file.name}" is too large (${(file.size / 1048576).toFixed(1)} MB). Max ${MAX_FILE_MB} MB.`,
+      `"${file.name}" is not supported. Allowed: PDF, DOCX, XLSX, TXT, MD, PNG, JPG, JPEG, WEBP.`,
+      "error"
+    );
+    return;
+  }
+
+  // Browser-side size check — avoids sending an oversized file only to get a 413.
+  // Images have a separate 10 MB limit to preserve Gemini OCR quota.
+  const isImage = IMAGE_EXTS.has(ext);
+  const maxMb   = isImage ? MAX_IMAGE_MB : MAX_FILE_MB;
+
+  if (file.size > maxMb * 1024 * 1024) {
+    showUploadMsg(
+      `"${file.name}" is too large (${(file.size / 1048576).toFixed(1)} MB). Max ${maxMb} MB for ${isImage ? "images" : "documents"}.`,
       "error"
     );
     return;

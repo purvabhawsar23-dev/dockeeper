@@ -139,6 +139,46 @@ def extract_txt(path: str | pathlib.Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Images (PNG, JPG, JPEG, WEBP)
+# ---------------------------------------------------------------------------
+
+IMAGE_MIME_TYPES = {
+    "png":  "image/png",
+    "jpg":  "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
+
+
+def extract_image(path: str | pathlib.Path) -> list[dict]:
+    """
+    Extract text from an image file using Gemini multimodal OCR.
+
+    Reads raw image bytes and sends them to ocr_image() in app/ocr.py.
+    Images have no pages, so the whole image is treated as page 1.
+    If the image contains no readable text, raises a clear error.
+    """
+    from app.ocr import ocr_image
+
+    file_path = pathlib.Path(path)
+    ext = file_path.suffix.lstrip(".").lower()
+    mime_type = IMAGE_MIME_TYPES.get(ext)
+    if not mime_type:
+        raise ValueError(
+            f"Unsupported image type '.{ext}'. "
+            f"Supported: {', '.join(IMAGE_MIME_TYPES.keys())}"
+        )
+
+    image_bytes = file_path.read_bytes()
+    text = ocr_image(image_bytes=image_bytes, mime_type=mime_type)
+
+    if not text:
+        raise ValueError("No readable text found in this image")
+
+    return [{"page": 1, "text": text}]
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -151,6 +191,10 @@ _PARSERS = {
     "xlsx": extract_xlsx,
     "txt":  extract_txt,
     "md":   extract_txt,   # Markdown is plain text; reuse the txt parser
+    "png":  extract_image,
+    "jpg":  extract_image,
+    "jpeg": extract_image,
+    "webp": extract_image,
 }
 
 SUPPORTED_TYPES = list(_PARSERS.keys())

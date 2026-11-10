@@ -14,16 +14,17 @@ from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException,
 from fastapi.responses import JSONResponse
 
 import app.db as db
-from app.config import MAX_UPLOAD_MB, UPLOAD_DIR
-from app.parsers import extract_text, SUPPORTED_TYPES
+from app.config import MAX_UPLOAD_MB, MAX_IMAGE_MB, UPLOAD_DIR
+from app.parsers import extract_text, SUPPORTED_TYPES, IMAGE_MIME_TYPES
 from app.processing import process_document
 
 router = APIRouter()
 
-# Maximum allowed file size in bytes, derived from the config value.
-# Computed once here rather than inside the handler so it's not re-calculated
-# on every request.
+# Maximum allowed file sizes in bytes.
+# Images have a smaller 10 MB limit because vision OCR models process images
+# uncompressed and we want to preserve API quota and prevent timeout issues.
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_IMAGE_BYTES  = MAX_IMAGE_MB * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,12 @@ async def upload_document(file: UploadFile = File(...),
             ),
         )
 
+    # Images use MAX_IMAGE_MB to keep Gemini OCR payloads and quota reasonable;
+    # other documents use MAX_UPLOAD_MB.
+    is_image = suffix in IMAGE_MIME_TYPES
+    max_bytes = MAX_IMAGE_BYTES if is_image else MAX_UPLOAD_BYTES
+    max_mb = MAX_IMAGE_MB if is_image else MAX_UPLOAD_MB
+
     # --- 2. Generate a safe stored filename ---
     # A UUID prefix guarantees uniqueness even if two users upload a file
     # with the same name.  Using only the extension (not the original name)
@@ -88,14 +95,15 @@ async def upload_document(file: UploadFile = File(...),
 
                 # Check the running total *before* writing so we never store
                 # more than the limit on disk, even partially.
-                if bytes_written > MAX_UPLOAD_BYTES:
+                if bytes_written > max_bytes:
                     # Close the file handle before deleting (required on Windows).
                     dest.close()
                     file_path.unlink(missing_ok=True)
+                    type_label = "Image" if is_image else "File"
                     raise HTTPException(
                         status_code=413,
                         detail=(
-                            f"File exceeds the {MAX_UPLOAD_MB} MB limit. "
+                            f"{type_label} exceeds the {max_mb} MB limit. "
                             f"Upload aborted and partial file deleted."
                         ),
                     )
@@ -225,6 +233,49 @@ def preview_document(doc_id: int):
             status_code=404,
             detail=f"File not found on disk: {file_path}",
         )
+
+    # For image files, do NOT call OCR again as it consumes API quota.
+    # Instead, return the stored chunk text from the chunks table.
+    if file_type in IMAGE_MIME_TYPES:
+        try:
+            with db.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT page_number, content
+                        FROM chunks
+                        WHERE document_id = %s
+                        ORDER BY chunk_index ASC
+                        """,
+                        (doc_id,),
+                    )
+                    chunk_rows = cur.fetchall()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+        if not chunk_rows:
+            preview_pages = [{
+                "page": 1,
+                "preview": "(Processing in progress or failed — no chunks stored yet)",
+            }]
+            pages_count = 0
+        else:
+            preview_pages = [
+                {
+                    "page": r[0],
+                    "preview": r[1][:500],
+                }
+                for r in chunk_rows
+            ]
+            pages_count = len(preview_pages)
+
+        return {
+            "id": doc_id_db,
+            "filename": filename,
+            "file_type": file_type,
+            "pages_extracted": pages_count,
+            "pages": preview_pages,
+        }
 
     # --- Parse the file ---
     try:

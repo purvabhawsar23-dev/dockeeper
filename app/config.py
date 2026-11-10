@@ -56,6 +56,11 @@ EMBED_TOKENS_PER_MINUTE: int = int(os.getenv("EMBED_TOKENS_PER_MINUTE", "25000")
 # change without hunting through route code.
 MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "200"))
 
+# Maximum allowed image upload size in megabytes.
+# Kept separate and smaller than general documents (10 MB vs 200 MB)
+# to protect Gemini vision quota and prevent oversized image transfers.
+MAX_IMAGE_MB: int = int(os.getenv("MAX_IMAGE_MB", "10"))
+
 # Where uploaded files are stored on disk. pathlib.Path is used throughout
 # the app for safe, cross-platform path operations.
 import pathlib
