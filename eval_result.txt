@@ -1,0 +1,45 @@
+PASS  [manual] What is the capacity of the AquaPure 3000?  key=True page=True
+PASS  [manual] How many filtration stages does it have?  key=True page=True
+PASS  [manual] What is the flow rate?  key=True page=True
+PASS  [manual] What is the power rating?  key=True page=True
+PASS  [manual] How long is the warranty on the RO membrane?  key=True page=True
+PASS  [manual] How often should the sediment filter be replaced?  key=True page=True
+PASS  [manual] How much does an RO membrane cost?  key=True page=True
+PASS  [manual] How often is the UV lamp replaced?  key=True page=True
+PASS  [manual] The water tastes salty. What is the cause?  key=True page=True
+PASS  [manual] The red light is blinking. What should I do?  key=True page=True
+PASS  [manual] How long should I wait after switching on before drinking?  key=True page=True
+PASS  [manual] How far should the unit be from the tap?  key=True page=True
+PASS  [manual] What should I do if the flow rate is low?  key=True page=True
+PASS  [manual] Can I run the unit without water?  key=True page=True
+PASS  [manual] How many screws are used for mounting?  key=True page=True
+PASS  [hostel] What is the monthly fee for a shared room?  key=True page=True
+PASS  [hostel] What is the security deposit?  key=True page=True
+PASS  [hostel] What is the late fee and when does it apply?  key=True page=True
+PASS  [hostel] What time do the gates close on weekends?  key=True page=True
+PASS  [hostel] Can guests stay overnight?  key=True page=True
+PASS  [hostel] When is room inspection?  key=True page=True
+PASS  [hostel] How much notice is needed before leaving the hostel?  key=True page=True
+PASS  [hostel] Who is the warden and what is her extension?  key=True page=True
+FAIL  [hostel] What is the emergency number?  key=False page=False
+      answer: I couldn't find this in your documents.
+      cited:  []
+PASS  [hostel] Can I cook in my room?  key=True page=True
+PASS  [hostel] What is the gate closing time on Tuesdays?  key=True page=True
+PASS  [notes] Where does photosynthesis take place?  key=True page=True
+PASS  [notes] What are the two stages of photosynthesis called?  key=True page=True
+PASS  [notes] Why do leaves look green?  key=True page=True
+PASS  [notes] What are the three limiting factors?  key=True page=True
+PASS  [refusal] What is the warranty of the Philips water purifier?  refused=True sources=0
+PASS  [refusal] What is the fee for a double room?  refused=True sources=0
+PASS  [refusal] What is the capital of France?  refused=True sources=0
+PASS  [refusal] What is the boiling point of water in the notes?  refused=True sources=0
+PASS  [refusal] Who is the principal of the school?  refused=True sources=0
+
+By category:
+  manual     15 of 15
+  hostel     10 of 11
+  notes      4 of 4
+  refusal    5 of 5
+
+Overall: 34 of 35 passed
