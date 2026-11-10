@@ -103,6 +103,14 @@ OCR_MODEL: str = os.getenv("OCR_MODEL", CHAT_MODEL)
 # Rate limit: max image OCR calls allowed per minute.
 OCR_REQUESTS_PER_MINUTE: int = int(os.getenv("OCR_REQUESTS_PER_MINUTE", "10"))
 
+# Maximum number of pages per PDF allowed to undergo OCR.
+# Prevents large scanned documents from exhausting API quota and budget.
+OCR_MAX_PAGES: int = int(os.getenv("OCR_MAX_PAGES", "30"))
+
+# Rendering resolution (DPI) when converting PDF pages to images for OCR.
+# 150 DPI provides sharp, legible text for OCR without generating huge image payloads.
+OCR_RENDER_DPI: int = int(os.getenv("OCR_RENDER_DPI", "150"))
+
 
 def get_database_url() -> str:
     """

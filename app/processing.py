@@ -17,7 +17,7 @@ import logging
 import pathlib
 
 import app.db as db
-from app.parsers import extract_text
+from app.parsers import extract_text, extract_pdf
 from app.chunker import chunk_pages
 from app.embeddings import embed_documents
 
@@ -106,19 +106,12 @@ def process_document(doc_id: int) -> None:
 
         # --- Parse ---
         logger.info("Processing doc %d (%s) — parsing ...", doc_id, filename)
-        pages = extract_text(path, file_type)
-
-        # --- Scanned PDF detection ---
-        # extract_pdf() returns a single page with needs_ocr=True when the
-        # whole document produced under 50 characters of text.
-        if pages and pages[0].get("needs_ocr"):
-            _set_status(
-                doc_id,
-                "failed",
-                "Scanned PDF: OCR not available yet.",
-            )
-            logger.warning("Doc %d is a scanned PDF — OCR not available.", doc_id)
-            return
+        if file_type == "pdf":
+            # Enable OCR during background processing so scanned pages can be transcribed.
+            # Multi-page OCR is safe here as it runs asynchronously in the background task.
+            pages = extract_pdf(path, allow_ocr=True)
+        else:
+            pages = extract_text(path, file_type)
 
         # Update page_count so the document list shows accurate info even
         # before embedding is complete.

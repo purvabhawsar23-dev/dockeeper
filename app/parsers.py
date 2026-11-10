@@ -11,13 +11,16 @@ and keeps the route handler focused on HTTP concerns, not file parsing.
 """
 
 import pathlib
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # PDF
 # ---------------------------------------------------------------------------
 
-def extract_pdf(path: str | pathlib.Path) -> list[dict]:
+def extract_pdf(path: str | pathlib.Path, allow_ocr: bool = False) -> list[dict]:
     """
     Extract text from a PDF, one dict per page.
 
@@ -25,6 +28,17 @@ def extract_pdf(path: str | pathlib.Path) -> list[dict]:
     loading the whole document into memory, which matters for large files.
     The document object is used as a context manager so it is closed
     automatically even if an exception is raised mid-way.
+
+    Parameters
+    ----------
+    path : str | pathlib.Path
+        Path to the PDF file on disk.
+    allow_ocr : bool, default False
+        When False (default): fast text extraction without OCR. If the document
+        has little to no digital text, returns a needs_ocr flag so callers
+        (like preview) know it is scanned without consuming Gemini vision quota.
+        When True: pages with under 50 characters of digital text are rendered to
+        in-memory PNGs at OCR_RENDER_DPI and transcribed using Gemini OCR.
     """
     import fitz  # PyMuPDF
 
@@ -35,13 +49,71 @@ def extract_pdf(path: str | pathlib.Path) -> list[dict]:
             text = page_obj.get_text()
             pages.append({"page": page_obj.number + 1, "text": text})
 
-    # Scanned-PDF detection: if the whole document produced almost no text,
-    # the PDF is likely image-based and needs OCR (not implemented yet).
-    # Returning a special marker lets the caller show a helpful status
-    # instead of storing empty chunks that would be useless for search.
+        # When OCR is not allowed (e.g. preview endpoint), return early to save quota
+        if not allow_ocr:
+            total_text = "".join(p["text"] for p in pages)
+            if len(total_text.strip()) < 50:
+                return [{"page": 1, "text": "", "needs_ocr": True}]
+            return pages
+
+        # ── OCR branch (allow_ocr=True) ──────────────────────────────────
+        from app.config import OCR_MAX_PAGES, OCR_RENDER_DPI
+        from app.ocr import ocr_image
+
+        # Why check for images on low-text pages?
+        # Blank pages and divider pages in normal text PDFs have < 50 characters
+        # but contain no images. Sending them to OCR wastes quota and falsely triggers
+        # the OCR_MAX_PAGES refusal on large digital PDFs.
+        needs_ocr_indices = [
+            i for i, p in enumerate(pages)
+            if len(p["text"].strip()) < 50 and bool(doc[i].get_images(full=True))
+        ]
+        n = len(needs_ocr_indices)
+        t = len(doc)
+
+        if n > 0:
+            if n > OCR_MAX_PAGES:
+                # If mostly scanned (>= 50% of total pages), fail fast before wasting quota
+                if n >= (t / 2):
+                    raise ValueError(
+                        f"This PDF has {n} pages that need OCR; the limit is {OCR_MAX_PAGES}."
+                    )
+                # Otherwise, it's a mostly-text PDF: OCR only up to the limit and skip the rest
+                skipped = n - OCR_MAX_PAGES
+                logger.warning(
+                    "Skipping OCR for %d pages exceeding the limit of %d",
+                    skipped,
+                    OCR_MAX_PAGES,
+                )
+                pages_to_ocr = needs_ocr_indices[:OCR_MAX_PAGES]
+            else:
+                pages_to_ocr = needs_ocr_indices
+
+            actual_ocr_count = len(pages_to_ocr)
+            for ocr_idx, page_idx in enumerate(pages_to_ocr, start=1):
+                page_obj = doc[page_idx]
+                page_num = pages[page_idx]["page"]
+                logger.info("OCR page %d of %d", ocr_idx, actual_ocr_count)
+
+                # Why in-memory rendering?
+                # PyMuPDF can render directly to raw PNG bytes in RAM, avoiding
+                # disk I/O and temporary file management/cleanup.
+                pix = page_obj.get_pixmap(dpi=OCR_RENDER_DPI)
+                png_bytes = pix.tobytes("png")
+                del pix  # free pixmap memory immediately
+
+                try:
+                    ocr_text = ocr_image(image_bytes=png_bytes, mime_type="image/png")
+                except Exception as exc:
+                    raise RuntimeError(f"OCR failed on page {page_num}: {exc}") from exc
+                finally:
+                    del png_bytes  # free image buffer immediately to keep memory usage low
+
+                pages[page_idx]["text"] = ocr_text
+
     total_text = "".join(p["text"] for p in pages)
     if len(total_text.strip()) < 50:
-        return [{"page": 1, "text": "", "needs_ocr": True}]
+        raise ValueError("No readable text found in this PDF")
 
     return pages
 
@@ -200,7 +272,7 @@ _PARSERS = {
 SUPPORTED_TYPES = list(_PARSERS.keys())
 
 
-def extract_text(path: str | pathlib.Path, file_type: str) -> list[dict]:
+def extract_text(path: str | pathlib.Path, file_type: str, allow_ocr: bool = False) -> list[dict]:
     """
     Dispatch to the right parser based on file_type (e.g. "pdf", "docx").
 
@@ -213,4 +285,6 @@ def extract_text(path: str | pathlib.Path, file_type: str) -> list[dict]:
             f"Unsupported file type '{file_type}'. "
             f"Supported: {', '.join(SUPPORTED_TYPES)}"
         )
+    if file_type.lower() == "pdf":
+        return parser(path, allow_ocr=allow_ocr)
     return parser(path)
