@@ -5,6 +5,7 @@ This file wires together the app, the database pool, and the HTTP routes.
 It is intentionally short: business logic lives in other modules.
 """
 
+import logging
 from contextlib import asynccontextmanager
 import pathlib
 
@@ -15,6 +16,9 @@ from fastapi.staticfiles import StaticFiles
 import app.db as db
 from app.routes_documents import router as documents_router
 from app.routes_chat import router as chat_router
+from app.processing import recover_interrupted_documents
+
+logger = logging.getLogger(__name__)
 
 # Path to the static folder — resolved relative to this file so it works
 # regardless of the working directory uvicorn was launched from.
@@ -36,6 +40,16 @@ async def lifespan(app: FastAPI):
     db.init_pool()
     db.init_db()
     print("✓ Database pool ready and schema applied.")
+
+    # Recover any documents that were interrupted mid-processing by a server restart.
+    # Why safe here? At startup no background job can be running, and automatic
+    # restarts would spend API quota without the user asking.
+    try:
+        recovered = recover_interrupted_documents()
+        if recovered > 0:
+            logger.info("Recovered %d interrupted document(s)", recovered)
+    except Exception as exc:
+        logger.error("Failed to recover interrupted documents: %s", exc)
 
     yield  # the app is now running and serving requests
 

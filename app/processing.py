@@ -60,6 +60,35 @@ def _set_page_count(doc_id: int, page_count: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Interrupted document recovery
+# ---------------------------------------------------------------------------
+
+def recover_interrupted_documents() -> int:
+    """
+    Mark any document stuck in 'uploaded' or 'processing' as 'failed' due to server restart.
+
+    Why is this safe to run at startup?
+      At startup, no background job can be running yet, so any document with status
+      'uploaded' or 'processing' was definitely abandoned by a server restart or crash.
+      We mark them 'failed' rather than restarting automatically so we do not spend
+      API quota without the user asking.
+    """
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE documents
+                SET status = 'failed',
+                    error_message = 'Interrupted by a server restart. Click Reprocess to try again.'
+                WHERE status IN ('uploaded', 'processing')
+                """
+            )
+            count = cur.rowcount
+        conn.commit()
+    return count
+
+
+# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
