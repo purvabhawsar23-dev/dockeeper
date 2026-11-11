@@ -1,156 +1,120 @@
 # DocKeeper
 
-A personal document question-answering app powered by RAG (Retrieval-Augmented Generation).
-Upload your PDFs, ask questions in plain language, and get answers grounded in your own documents with numbered citations.
+A personal document keeper. Upload your documents (PDF, Word, Excel, text, images, scanned
+PDFs), then ask questions in English or Hindi, by typing or by voice. Answers cite the
+document and page they came from, and the app says "I couldn't find this in your
+documents" instead of guessing.
 
----
+![Documents](docs/01_documents.png)
 
-## What's in here
+## Features
 
-| File / Folder | Purpose |
+- Upload PDF, DOCX, XLSX, TXT, MD and images (PNG, JPG, WEBP)
+- OCR for images and scanned PDFs, using Gemini vision
+- Hybrid search: meaning search (vector) plus exact keyword search, merged with
+  Reciprocal Rank Fusion
+- Answers with clickable citations that open the source passage and page
+- Relevance gate: refuses questions the documents cannot answer
+- Hindi and English questions and answers, and follow-up questions with conversation memory
+- Voice input (speech recognition) and spoken answers (speech synthesis)
+- Large-file handling: streamed uploads, background processing, batched embeddings with
+  rate-limit retries, and recovery of jobs interrupted by a restart
+
+## Screenshots
+
+| Cited answer | Refusal | Hindi |
+|---|---|---|
+| ![Cited answer](docs/02_cited_answer.png) | ![Refusal](docs/03_refusal.png) | ![Hindi](docs/04_hindi.png) |
+
+## How it works
+
+```
+UPLOAD (runs in the background)
+file -> save under a uuid name -> extract text by page (OCR for scans and images)
+     -> cut into overlapping chunks -> embed each chunk (Gemini, 768 numbers)
+     -> store in PostgreSQL + pgvector
+
+QUESTION
+question (typed or spoken) -> rewrite follow-ups into standalone questions
+     -> vector search + keyword search -> merge with RRF -> relevance gate
+     -> Gemini answers only from the numbered sources, with [n] citations
+```
+
+## Tech stack
+
+| Part | Choice |
 |---|---|
-| `docker-compose.yml` | Runs a Postgres + pgvector database in Docker |
-| `sql/schema.sql` | Creates the `documents` and `chunks` tables |
-| `app/config.py` | Reads all settings from `.env` |
-| `app/db.py` | Connection pool and schema runner |
-| `app/main.py` | FastAPI app, lifespan wiring, and `/health` endpoint |
-| `app/parsers.py` | Text extraction for PDF, DOCX, XLSX, TXT, MD |
-| `app/chunker.py` | Splits extracted pages into overlapping ~600-token chunks |
-| `app/embeddings.py` | Gemini embedding wrapper with batching, throttling, and retry |
-| `app/processing.py` | Full pipeline: parse → chunk → embed → store in Postgres |
-| `app/search.py` | Vector search, keyword search, and hybrid RRF fusion |
-| `app/llm.py` | Gemini chat wrapper with rate-limit retry |
-| `app/routes_documents.py` | Upload, list, status, preview, delete endpoints |
-| `app/routes_chat.py` | `/chat` answer endpoint and `/search/hybrid` debug endpoint |
-| `requirements.txt` | Python dependencies |
-| `uploads/` | Where uploaded files are stored (not committed to git) |
+| Backend | Python 3.12, FastAPI, uvicorn |
+| Database | PostgreSQL 16 with pgvector (in Docker) |
+| Embeddings | gemini-embedding-001, 768 dimensions |
+| Answers and OCR | Gemini (model set in `.env`) |
+| Parsing | PyMuPDF, python-docx, openpyxl |
+| Frontend | Plain HTML, CSS and JavaScript (no framework) |
+| Voice | Browser SpeechRecognition and speechSynthesis |
 
----
+## Setup
 
-## How to run it
+You need Python 3.12, Docker Desktop and a Gemini API key from Google AI Studio.
 
-**1. Copy the example env file and fill in your values**
-```powershell
+```
+git clone https://github.com/purvabhawsar23-dev/dockeeper.git
+cd dockeeper
+py -3.12 -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 copy .env.example .env
 ```
-Open `.env` and set `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `GEMINI_API_KEY`.
 
-**2. Install Python dependencies**
-```powershell
-venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+Edit `.env`: set a database password and your `GEMINI_API_KEY`, with no quotes. Set
+`CHAT_MODEL` to a current Gemini Flash model ID from your AI Studio model list, because
+model IDs change.
+
 ```
-
-**3. Start the database**
-```powershell
 docker compose up -d
-```
-
-**4. Start the API server**
-```powershell
 uvicorn app.main:app --reload
 ```
 
-**5. Check everything is working**
+Open http://localhost:8000/ (the API docs are at http://localhost:8000/docs).
 
-Open **`http://localhost:8000/`** — the full web interface. Upload documents, then ask questions.
+## API endpoints
 
-```
-http://localhost:8000/          ← web UI
-http://localhost:8000/health    ← database check
-http://localhost:8000/docs      ← interactive API docs
-```
-
----
-
-## API Endpoints
-
-### Health
-| Method | Path | Description |
+| Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | Database connectivity and extension check |
+| GET | `/health` | Database and pgvector check |
+| POST | `/upload` | Upload a file and start processing |
+| GET | `/documents` | List documents |
+| GET | `/documents/{id}/status` | Status, error message, chunks stored |
+| POST | `/documents/{id}/process` | Reprocess a document |
+| GET | `/documents/{id}/preview` | Debug: extracted text |
+| DELETE | `/documents/{id}` | Delete a document and its chunks |
+| GET | `/search`, `/search/hybrid` | Debug: vector and hybrid search |
+| POST | `/chat` | Ask a question, get a cited answer |
 
-### Documents
-| Method | Path | Description |
-|---|---|---|
-| POST | `/upload` | Upload a file (PDF, DOCX, XLSX, TXT, MD — max 200 MB). Processing starts automatically. |
-| GET | `/documents` | List all documents, newest first |
-| GET | `/documents/{id}/status` | Processing status, error message, and chunk count |
-| POST | `/documents/{id}/process` | Re-run processing manually |
-| GET | `/documents/{id}/preview` | First 500 chars of each extracted page *(debug)* |
-| DELETE | `/documents/{id}` | Delete a document and its file from disk |
+## Evaluation
 
-### Chat
-| Method | Path | Description |
-|---|---|---|
-| POST | `/chat` | Ask a question; returns an answer with numbered citations |
+I tested 35 questions on three small documents, including 5 that must be refused.
+The score went from 29 of 35 to 34 of 35 after fixing the answer prompt and the relevance
+threshold. A 120-page PDF was processed with no lost pages. The questions and scoring
+script were drafted with AI assistance, and the final score is not a blind test.
+Full results, including every change and the known miss: [RESULTS.md](RESULTS.md).
 
-### Search & Debug
-| Method | Path | Description |
-|---|---|---|
-| GET | `/search?q=...&limit=5` | Vector-only search *(debug)* |
-| GET | `/search/hybrid?q=...&limit=8` | Hybrid search showing RRF scores *(debug)* |
+## Limitations
 
-#### Example: ask a question
-```powershell
-curl -X POST http://localhost:8000/chat `
-  -H "Content-Type: application/json" `
-  -d "{\"question\": \"What is the refund policy?\"}"
-```
+- The evaluation is small (35 questions, 4 short documents).
+- Short questions can score below the relevance threshold even when the answer exists
+  (for example, "What is the emergency number?").
+- Scanned-PDF OCR uses one Gemini request per page and is limited to 30 pages per file.
+- Free-tier API limits apply and can change, so large batches take time.
+- Your document text is sent to Google's Gemini API. On the free tier, Google may use it
+  to improve its products, so do not use sensitive documents.
+- Speech recognition works in Chrome and sends audio to Google's service. A Hindi voice
+  for spoken answers depends on the voices installed on your device.
+- Single user, no login.
 
-#### Example: hybrid search debug
-```powershell
-curl "http://localhost:8000/search/hybrid?q=machine+learning&limit=5"
-```
+## How this was built
 
-#### Example: upload a file
-```powershell
-curl -X POST http://localhost:8000/upload -F "file=@mydoc.pdf"
-```
-
----
-
-## Full pipeline
-
-```
-Upload saved to disk
-       ↓
-Status → 'processing'
-       ↓
-Parse file into pages  (parsers.py)
-       ↓
-Split into ~600-token overlapping chunks  (chunker.py)
-       ↓
-Embed chunks via Gemini API in batches  (embeddings.py)
-       ↓
-Insert chunks + vectors into Postgres  (processing.py)
-       ↓
-Status → 'ready'
-
-── At query time ──────────────────────────────────────
-Question
-       ↓
-Embed query  (embeddings.py)
-       ↓
-Vector search (HNSW) + Keyword search (GIN/tsv)  (search.py)
-       ↓
-Reciprocal Rank Fusion → top FINAL_K chunks
-       ↓
-Relevance gate (MIN_SIMILARITY)
-       ↓
-Build numbered context, capped at MAX_CONTEXT_CHARS
-       ↓
-Gemini LLM generates answer with [n] citations  (llm.py)
-       ↓
-{"answer": "...", "sources": [...]}
-```
-
----
-
-## Stopping the database
-
-```powershell
-docker compose down
-```
-
-Add `-v` to also delete all stored data: `docker compose down -v`.
+Built with AI assistance: the code was generated by an AI coding agent from prompts I
+ran and reviewed, with design guidance from an AI assistant. I ran every test, checked
+the failures against the documents, and made the fixes documented in RESULTS.md.
+I made the key design decisions: PostgreSQL with pgvector, hybrid search, and the
+relevance gate.
